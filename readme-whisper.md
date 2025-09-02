@@ -1,16 +1,34 @@
 # Whisper.cpp Local Speech Recognition Setup Guide
 
-A complete walkthrough for setting up voice-controlled Claude Code using whisper.cpp for speech-to-text and Voice Mode MCP server, with fully local speech recognition.
+A complete walkthrough for setting up voice-controlled Claude Code using whisper.cpp for speech-to-text and Voice Mode MCP server, with fully local speech recognition and system text-to-speech.
 
 ## Overview
 
 This guide configures:
-- **whisper.cpp** - Fast local speech recognition (no API costs, complete privacy)
-- **whisper-server** - Built-in server from whisper.cpp (works with Voice Mode MCP)
+- **whisper.cpp** - Fast local speech recognition (no API costs, complete privacy for input)
+- **whisper-server** - Built-in server from whisper.cpp (OpenAI Whisper API compatible)
 - **Voice Mode MCP** - Natural voice interface for Claude Code
 - **Claude Code** - Your AI coding assistant
+- **System TTS** - Built-in text-to-speech using your OS's native voice synthesis
 
-**Result**: Speak naturally to Claude Code, with all processing happening locally on your machine.
+**Result**: Speak naturally to Claude Code with fully local speech processing and voice responses.
+
+## Architecture
+
+| Component | Function | Location | Privacy |
+|-----------|----------|----------|---------|
+| **Speech-to-Text** | whisper.cpp | Local (CPU optimized) | ✅ Fully private |
+| **Text-to-Speech** | System TTS (say/espeak) | Local | ✅ Fully private |
+| **Processing** | Claude Code | Local/Cloud | Depends on Claude config |
+
+## Performance Characteristics
+
+| Model | Size | Speed (M2 Mac) | Accuracy | Use Case |
+|-------|------|----------------|----------|----------|
+| tiny.en | 39MB | ~100x real-time | Lower | Quick commands |
+| base.en | 140MB | ~50x real-time | Good | **Best balance** ⭐ |
+| small.en | 466MB | ~30x real-time | Better | Longer dictation |
+| medium.en | 1.5GB | ~15x real-time | Great | Professional use |
 
 ## Compatibility Notes
 
@@ -24,13 +42,25 @@ This guide configures:
 
 ## Prerequisites
 
-- macOS or Linux (Windows via WSL2)
-- Claude Code installed (`npm install -g @anthropic-ai/claude-code`)
-- Git for cloning repositories
-- C/C++ compiler (Xcode Command Line Tools on macOS, build-essential on Linux)
-- CMake for building whisper.cpp (`brew install cmake` on macOS, `apt install cmake` on Linux)
+### Hardware Requirements
+- macOS (Apple Silicon or Intel), Linux, or Windows (via WSL2)
+- 4GB+ RAM recommended
 - ~2GB disk space for models
 - Microphone access
+
+### Software Requirements
+- Claude Code installed (`npm install -g @anthropic-ai/claude-code`)
+- Git for cloning repositories
+- C/C++ compiler:
+  - macOS: Xcode Command Line Tools (`xcode-select --install`)
+  - Linux: build-essential (`sudo apt install build-essential`)
+  - Windows: Use WSL2 with Linux instructions
+- CMake for building whisper.cpp:
+  - macOS: `brew install cmake`
+  - Linux: `sudo apt install cmake`
+
+### Optional Requirements
+- None - everything runs locally
 
 ## Step 1: Install whisper.cpp
 
@@ -58,6 +88,19 @@ bash ./models/download-ggml-model.sh base.en
 | base.en | 140MB | Fast | Good | **Best balance** ⭐ |
 | small.en | 466MB | Medium | Better | Longer dictation |
 | medium.en | 1.5GB | Slower | Great | Professional use |
+
+### Build Options for Optimization
+
+```bash
+# For Apple Silicon Macs (M1/M2/M3) with Metal acceleration
+make clean && make GGML_METAL=1
+
+# For Intel Macs with AVX support
+make clean && make GGML_OPENBLAS=1
+
+# For NVIDIA GPUs (Linux)
+make clean && make GGML_CUDA=1
+```
 
 ## Step 2: Download Whisper Model
 
@@ -106,6 +149,12 @@ lsof -i :2022
 # Should show: whisper-se ... TCP localhost:2022 (LISTEN)
 ```
 
+### API Endpoints
+
+The whisper-server provides these OpenAI-compatible endpoints:
+- `GET /` - Health check and server info
+- `POST /v1/audio/transcriptions` - Transcribe audio (OpenAI Whisper API format)
+- `GET /v1/models` - List available models
 
 ## Step 4: Configure Voice Mode for Claude Code
 
@@ -113,14 +162,21 @@ lsof -i :2022
 # Set environment variable to use local Whisper
 export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"
 
-# Optional: Set local TTS if you have it
-# export VOICEMODE_TTS_BASE_URL="http://127.0.0.1:8880/v1"
+# System TTS is used by default for voice responses
+# No additional configuration needed
 
 # Add to your shell profile for persistence
 echo 'export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"' >> ~/.bashrc
 # or for zsh:
 echo 'export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"' >> ~/.zshrc
 ```
+
+### Environment Variables
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `VOICEMODE_STT_BASE_URL` | Speech-to-text endpoint | `http://127.0.0.1:2022/v1` |
+| `VOICEMODE_TTS_BASE_URL` | Text-to-speech endpoint | System TTS (default) |
 
 ## Step 5: Install Voice Mode MCP
 
@@ -171,6 +227,19 @@ claude
 # - Your speech transcribed to text
 ```
 
+### Test API Directly
+
+```bash
+# Record a test audio file
+rec -r 16000 -c 1 test.wav trim 0 5
+
+# Test transcription via API
+curl -X POST "http://127.0.0.1:2022/v1/audio/transcriptions" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@test.wav" \
+  -F "model=whisper-1"
+```
+
 ### Verify Whisper Processing
 
 ```bash
@@ -194,6 +263,13 @@ Once everything is running:
    - "Refactor this function to use async/await"
    - "Write tests for the user authentication module"
 
+### Voice Interaction Tips
+
+- **Clear speech**: Speak clearly and at a moderate pace
+- **Pause between commands**: Allow a moment for processing
+- **Background noise**: Minimize for best results
+- **Microphone position**: Keep consistent distance from mic
+
 ### Pro Tips
 
 1. **Keep the API server running**: Add to your startup scripts
@@ -205,7 +281,7 @@ Once everything is running:
 
 ### macOS (launchd)
 
-Create `~/Library/LaunchAgents/com.whisper.api.plist`:
+Create `~/Library/LaunchAgents/com.whisper.server.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -214,12 +290,14 @@ Create `~/Library/LaunchAgents/com.whisper.api.plist`:
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.whisper.api</string>
+    <string>com.whisper.server</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/whisper-api-server/target/release/whisper-api-server</string>
-        <string>--model-path</string>
+        <string>/Users/YOUR_USERNAME/whisper.cpp/build/bin/whisper-server</string>
+        <string>-m</string>
         <string>/Users/YOUR_USERNAME/whisper.cpp/models/ggml-base.en.bin</string>
+        <string>--host</string>
+        <string>127.0.0.1</string>
         <string>--port</string>
         <string>2022</string>
     </array>
@@ -227,29 +305,41 @@ Create `~/Library/LaunchAgents/com.whisper.api.plist`:
     <true/>
     <key>KeepAlive</key>
     <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/whisper-server.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/whisper-server.error.log</string>
 </dict>
 </plist>
 ```
 
 Then:
 ```bash
-launchctl load ~/Library/LaunchAgents/com.whisper.api.plist
+# Load the service
+launchctl load ~/Library/LaunchAgents/com.whisper.server.plist
+
+# Check status
+launchctl list | grep whisper
+
+# View logs
+tail -f /tmp/whisper-server.log
 ```
 
 ### Linux (systemd)
 
-Create `/etc/systemd/system/whisper-api.service`:
+Create `/etc/systemd/system/whisper-server.service`:
 
 ```ini
 [Unit]
-Description=Whisper API Server
+Description=Whisper.cpp Server
 After=network.target
 
 [Service]
 Type=simple
 User=YOUR_USERNAME
-ExecStart=/home/YOUR_USERNAME/whisper-api-server/target/release/whisper-api-server \
-  --model-path /home/YOUR_USERNAME/whisper.cpp/models/ggml-base.en.bin \
+ExecStart=/home/YOUR_USERNAME/whisper.cpp/build/bin/whisper-server \
+  -m /home/YOUR_USERNAME/whisper.cpp/models/ggml-base.en.bin \
+  --host 127.0.0.1 \
   --port 2022
 Restart=always
 
@@ -259,22 +349,28 @@ WantedBy=multi-user.target
 
 Then:
 ```bash
-sudo systemctl enable whisper-api
-sudo systemctl start whisper-api
+sudo systemctl enable whisper-server
+sudo systemctl start whisper-server
+sudo systemctl status whisper-server
 ```
 
 ## Making the Setup Persistent
 
-### Option 1: Manual Start
+### Option 1: Manual Start Script
+
 Add to your shell profile (~/.zshrc or ~/.bashrc):
 ```bash
 # Start whisper server in background on shell start
 alias whisper-start='cd ~/whisper.cpp && nohup ./build/bin/whisper-server -m models/ggml-base.en.bin --host 127.0.0.1 --port 2022 > /tmp/whisper.log 2>&1 &'
 alias whisper-stop='pkill -f whisper-server'
 alias whisper-logs='tail -f /tmp/whisper.log'
+
+# Set Voice Mode environment
+export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"
 ```
 
 ### Option 2: Automatic Start (Recommended)
+
 Use the launchd service created earlier:
 ```bash
 # Load the service (starts automatically on login)
@@ -291,6 +387,46 @@ tail -f /tmp/whisper-server.error.log
 launchctl stop com.whisper.server
 launchctl start com.whisper.server
 ```
+
+### Helper Script
+
+Create `~/start-whisper.sh`:
+```bash
+#!/bin/bash
+# Whisper Voice Mode Setup Script
+
+echo "Starting Whisper Voice Mode Setup..."
+
+# Check if whisper-server is already running
+if pgrep -x "whisper-server" > /dev/null; then
+    echo "✓ Whisper server is already running"
+else
+    echo "Starting whisper server..."
+    cd ~/whisper.cpp
+    nohup ./build/bin/whisper-server \
+        -m models/ggml-base.en.bin \
+        --host 127.0.0.1 \
+        --port 2022 > /tmp/whisper.log 2>&1 &
+    
+    sleep 2
+    
+    if pgrep -x "whisper-server" > /dev/null; then
+        echo "✓ Whisper server started successfully"
+    else
+        echo "✗ Failed to start whisper server"
+        exit 1
+    fi
+fi
+
+# Set environment variable
+export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"
+echo "✓ Environment variable set"
+
+echo ""
+echo "Ready! Start Claude Code with: claude"
+```
+
+Make it executable: `chmod +x ~/start-whisper.sh`
 
 ## Troubleshooting
 
@@ -374,6 +510,23 @@ bash ./models/download-ggml-model.sh tiny.en
 ./build/bin/whisper-server -m models/ggml-tiny.en.bin --host 127.0.0.1 --port 2022
 ```
 
+### TTS Not Working
+```bash
+# Check if system TTS is available
+# macOS:
+which say
+
+# Linux:
+which espeak || which festival
+
+# Test system TTS
+# macOS:
+say "Hello from system text to speech"
+
+# Linux:
+espeak "Hello from system text to speech"
+```
+
 ## Performance Optimization
 
 ### For Faster Response
@@ -388,6 +541,24 @@ bash ./models/download-ggml-model.sh tiny.en
 - Use a quality microphone
 - Reduce background noise
 
+### CPU Optimization
+```bash
+# Check CPU features
+sysctl -a | grep cpu.features  # macOS
+lscpu | grep Flags              # Linux
+
+# Build with optimizations
+make clean
+make GGML_OPENBLAS=1  # For BLAS acceleration
+make GGML_METAL=1      # For Apple Silicon
+```
+
+### Memory Usage
+- tiny.en: ~390MB RAM
+- base.en: ~500MB RAM
+- small.en: ~1GB RAM
+- medium.en: ~2.6GB RAM
+
 ## Uninstall
 
 ```bash
@@ -395,31 +566,48 @@ bash ./models/download-ggml-model.sh tiny.en
 claude mcp remove voice-mode
 
 # Stop background service (macOS)
-launchctl unload ~/Library/LaunchAgents/com.whisper.api.plist
+launchctl unload ~/Library/LaunchAgents/com.whisper.server.plist
+rm ~/Library/LaunchAgents/com.whisper.server.plist
 
 # Stop background service (Linux)
-sudo systemctl stop whisper-api
-sudo systemctl disable whisper-api
+sudo systemctl stop whisper-server
+sudo systemctl disable whisper-server
+sudo rm /etc/systemd/system/whisper-server.service
 
-# Remove files (optional)
+# Remove whisper.cpp (optional)
 rm -rf ~/whisper.cpp
-rm -rf ~/whisper-api-server
+
+# Remove environment variables
+# Edit ~/.bashrc or ~/.zshrc and remove the VOICEMODE_STT_BASE_URL line
 ```
 
 ## Next Steps
 
+### Add Local Text-to-Speech
+- **Piper**: Fast, lightweight, multilingual (`pip install piper-tts`)
+- **Coqui TTS**: High quality, voice cloning capable
+- **bark**: Realistic speech with emotion
+- **Kokoro**: Small, fast, good quality
+
+### Enhance Speech Recognition
 - **Custom Wake Words**: Integrate with tools like Porcupine for "Hey Claude"
-- **Better TTS**: Set up local Kokoro or Piper for responses
 - **Noise Cancellation**: Add RNNoise for cleaner input
 - **Multi-language**: Download non-English whisper models
+- **Voice Activity Detection**: Add silero-vad for better segmentation
+
+### Alternative Implementations
+- **Faster Whisper**: 4x faster with same accuracy (Python)
+- **WhisperX**: With word-level timestamps and speaker diarization
+- **Whisper JAX**: For TPU acceleration
 
 ## Resources
 
 - [whisper.cpp Documentation](https://github.com/ggml-org/whisper.cpp)
+- [OpenAI Whisper Paper](https://arxiv.org/abs/2212.04356)
 - [Voice Mode Documentation](https://voice-mode.readthedocs.io)
 - [Claude Code Documentation](https://docs.anthropic.com/claude-code)
 - [MCP Protocol Spec](https://modelcontextprotocol.io)
 
 ---
 
-**Privacy Note**: This setup processes all audio locally on your machine. No audio data is sent to external servers. Your voice commands and code remain completely private.
+**Privacy Note**: All voice processing happens locally on your machine. Speech-to-text uses whisper.cpp and text-to-speech uses your system's built-in voice synthesis. No audio data or text is sent to external servers. Your voice commands and responses remain completely private.

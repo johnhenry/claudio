@@ -1,16 +1,34 @@
-# Local NVIDIA Parakeet + Claude Code Voice Mode Setup Guide
+# NVIDIA Parakeet Local Speech Recognition Setup Guide
 
-A complete walkthrough for setting up voice-controlled Claude Code using NVIDIA's Parakeet ASR model and Voice Mode MCP server, with ultra-fast local speech-to-text processing.
+A complete walkthrough for setting up voice-controlled Claude Code using NVIDIA Parakeet ASR for speech-to-text and Voice Mode MCP server, with ultra-fast local speech recognition and system text-to-speech.
 
 ## Overview
 
 This guide configures:
-- **NVIDIA Parakeet ASR** - Ultra-fast local speech recognition (3386x real-time on GPU, 10x on CPU)
-- **OpenAI-compatible API server** - FastAPI wrapper that works with Voice Mode MCP
+- **NVIDIA Parakeet ASR** - Ultra-fast local speech recognition (up to 3386x real-time on GPU)
+- **OpenAI-compatible API server** - FastAPI wrapper that works with Voice Mode MCP  
 - **Voice Mode MCP** - Natural voice interface for Claude Code
 - **Claude Code** - Your AI coding assistant
+- **System TTS** - Built-in text-to-speech using your OS's native voice synthesis
 
-**Result**: Speak naturally to Claude Code with blazing-fast speech recognition, all processing locally on your machine.
+**Result**: Speak naturally to Claude Code with blazing-fast local speech processing and system voice responses.
+
+## Architecture
+
+| Component | Function | Location | Privacy |
+|-----------|----------|----------|---------|
+| **Speech-to-Text** | NVIDIA Parakeet ASR | Local (GPU/CPU) | ✅ Fully private |
+| **Text-to-Speech** | System TTS (say/espeak) | Local | ✅ Fully private |
+| **Processing** | Claude Code | Local/Cloud | Depends on Claude config |
+
+## Performance Characteristics
+
+| Hardware | Model | Speed | Power Usage | Use Case |
+|----------|-------|-------|-------------|----------|
+| RTX 4090 | Parakeet-TDT-0.6B | 3386x real-time | ~100W | Production server |
+| RTX 3060 | Parakeet-TDT-0.6B | ~1000x real-time | ~60W | Development |
+| M2 Mac (CPU) | Parakeet-TDT-0.6B | ~15x real-time | ~20W | **Current setup** |
+| Intel i7 (CPU) | Parakeet-TDT-0.6B | ~10x real-time | ~45W | Fallback option |
 
 ## Why Parakeet Instead of Whisper?
 
@@ -18,14 +36,32 @@ This guide configures:
 - **Accuracy**: State-of-the-art WER (Word Error Rate) performance
 - **Features**: Built-in punctuation, capitalization, and timestamp prediction
 - **Efficiency**: 600M parameters optimized for real-time transcription
+- **Architecture**: Modern RNNT (Recurrent Neural Network Transducer) design
+
+## Compatibility Notes
+
+⚠️ **Important**: Parakeet requires NVIDIA NeMo framework which has specific dependencies.
+
+- **Current Setup**: Uses FastAPI server with OpenAI Whisper API compatibility
+- **GPU Support**: Optimized for NVIDIA GPUs but runs on CPU (slower)
+- **Model Format**: Uses `.nemo` format (not ONNX or GGML)
 
 ## Prerequisites
 
-- macOS, Linux, or Windows (via WSL2)
-- Python 3.8-3.11
-- Claude Code installed (`npm install -g @anthropic-ai/claude-code`)
-- ~2GB disk space for models
+### Hardware Requirements
+- macOS (Apple Silicon or Intel), Linux, or Windows (via WSL2)
+- 8GB+ RAM recommended (16GB+ for comfortable operation)
+- ~3GB disk space for models
+- Microphone access
 - Optional but recommended: NVIDIA GPU with CUDA 11.8+
+
+### Software Requirements
+- Python 3.8-3.11 (3.12+ not yet supported by NeMo)
+- Claude Code installed (`npm install -g @anthropic-ai/claude-code`)
+- Git for cloning repositories
+
+### Optional Requirements
+- NVIDIA GPU with CUDA 11.8+ for maximum performance
 
 ## Step 1: Install NVIDIA NeMo and Dependencies
 
@@ -37,18 +73,28 @@ source ~/parakeet-asr/bin/activate
 # Install PyTorch (with CUDA if you have NVIDIA GPU)
 # For GPU:
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# For CPU only:
-# pip install torch torchvision torchaudio
+# For CPU only (macOS/no GPU):
+pip install torch torchvision torchaudio
 
 # Install Cython (required for NeMo)
 pip install Cython
 
 # Install NVIDIA NeMo ASR
-pip install nemo_toolkit[asr]
+pip install "nemo_toolkit[asr]"
 
 # Install server dependencies
 pip install fastapi uvicorn python-multipart soundfile librosa
 ```
+
+### Dependency Notes
+
+NeMo has many dependencies including:
+- NumPy, SciPy, scikit-learn for numerical operations
+- PyTorch for deep learning
+- Numba for JIT compilation
+- Various audio processing libraries
+
+Installation may take 10-15 minutes depending on your internet speed.
 
 ## Step 2: Download Parakeet Model
 
@@ -56,14 +102,20 @@ pip install fastapi uvicorn python-multipart soundfile librosa
 # Create models directory
 mkdir -p ~/parakeet-asr/models
 
-# Download Parakeet-TDT-0.6B model (600MB)
+# Download Parakeet-TDT-0.6B model (2.3GB)
 cd ~/parakeet-asr/models
 wget https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/resolve/main/parakeet-tdt-0.6b-v2.nemo
 
 # Verify download
 ls -lh parakeet-tdt-0.6b-v2.nemo
-# Should show ~600MB file
+# Should show ~2.3GB file
 ```
+
+### Model Information
+
+| Model | Parameters | Size | Language | Features |
+|-------|------------|------|----------|----------|
+| Parakeet-TDT-0.6B-v2 | 600M | 2.3GB | English | Punctuation, capitalization, timestamps |
 
 ## Step 3: Create OpenAI-Compatible API Server
 
@@ -77,6 +129,7 @@ Ultra-fast speech recognition for Voice Mode
 """
 
 import io
+import os
 import time
 import logging
 from typing import Optional
@@ -115,9 +168,10 @@ def load_model():
         import nemo.collections.asr as nemo_asr_module
         nemo_asr = nemo_asr_module
         
-        model = nemo_asr.models.ASRModel.restore_from(
-            os.path.expanduser("~/parakeet-asr/models/parakeet-tdt-0.6b-v2.nemo")
-        )
+        model_path = os.path.expanduser("~/parakeet-asr/models/parakeet-tdt-0.6b-v2.nemo")
+        logger.info(f"Loading model from: {model_path}")
+        
+        model = nemo_asr.models.ASRModel.restore_from(model_path)
         model.eval()
         
         if torch.cuda.is_available():
@@ -257,6 +311,18 @@ if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=2022)
 ```
 
+Make it executable:
+```bash
+chmod +x ~/parakeet-asr/server.py
+```
+
+### API Endpoints
+
+The Parakeet server provides these OpenAI-compatible endpoints:
+- `GET /` - Health check and server info
+- `POST /v1/audio/transcriptions` - Transcribe audio (OpenAI Whisper API format)
+- `GET /v1/models` - List available models
+
 ## Step 4: Start the Parakeet Server
 
 ```bash
@@ -265,9 +331,6 @@ cd ~/parakeet-asr
 
 # Activate virtual environment
 source bin/activate
-
-# Make server executable
-chmod +x server.py
 
 # Start the server
 python server.py
@@ -291,8 +354,6 @@ curl -s http://127.0.0.1:2022 | head -5
 #     <html>
 #     <head>
 #         <title>Parakeet ASR Server</title>
-#     </head>
-#     <body>
 
 # Check if port is listening
 lsof -i :2022
@@ -305,11 +366,21 @@ lsof -i :2022
 # Set environment variable to use local Parakeet
 export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"
 
+# System TTS is used by default for voice responses
+# No additional configuration needed
+
 # Add to your shell profile for persistence
 echo 'export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"' >> ~/.bashrc
 # or for zsh:
 echo 'export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"' >> ~/.zshrc
 ```
+
+### Environment Variables
+
+| Variable | Purpose | Example |
+|----------|---------|---------|
+| `VOICEMODE_STT_BASE_URL` | Speech-to-text endpoint | `http://127.0.0.1:2022/v1` |
+| `VOICEMODE_TTS_BASE_URL` | Text-to-speech endpoint | System TTS (default) |
 
 ## Step 6: Install Voice Mode MCP
 
@@ -342,6 +413,9 @@ echo $VOICEMODE_STT_BASE_URL
 # 4. Check Voice Mode MCP is installed
 claude mcp list | grep voice-mode
 # Should show: voice-mode: uvx voice-mode - ✓ Connected
+
+# 5. Check GPU availability (optional)
+python -c "import torch; print('GPU' if torch.cuda.is_available() else 'CPU')"
 ```
 
 ### Test Voice Transcription
@@ -378,6 +452,21 @@ time curl -X POST "http://127.0.0.1:2022/v1/audio/transcriptions" \
 # CPU: ~1s for 10s audio (10x real-time)
 ```
 
+### Test API Directly with Python
+
+```python
+import requests
+
+# Test transcription
+with open("test.wav", "rb") as f:
+    response = requests.post(
+        "http://127.0.0.1:2022/v1/audio/transcriptions",
+        files={"file": f},
+        data={"model": "whisper-1"}
+    )
+    print(response.json()["text"])
+```
+
 ## Usage
 
 ### Basic Voice Commands
@@ -392,11 +481,18 @@ Once everything is running:
    - "Refactor this function to use async/await"
    - "Write tests for the user authentication module"
 
+### Voice Interaction Tips
+
+- **Clear speech**: Parakeet handles natural speech well
+- **No pauses needed**: Ultra-fast processing means minimal latency
+- **Technical terms**: Excellent recognition of programming terminology
+- **Continuous speech**: Can handle long dictation without issues
+
 ### Pro Tips
 
 1. **Keep the server running**: Add to your startup scripts
-2. **Ultra-fast response**: Parakeet processes speech faster than you can speak
-3. **GPU acceleration**: If you have NVIDIA GPU, responses are near-instantaneous
+2. **GPU acceleration**: If you have NVIDIA GPU, responses are near-instantaneous
+3. **Model caching**: First request loads model, subsequent are faster
 4. **Background service**: See below for systemd/launchd setup
 
 ## Running as a Background Service
@@ -426,13 +522,25 @@ Create `~/Library/LaunchAgents/com.parakeet.asr.plist`:
     <string>/tmp/parakeet.log</string>
     <key>StandardErrorPath</key>
     <string>/tmp/parakeet.error.log</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
 </dict>
 </plist>
 ```
 
 Then:
 ```bash
+# Load the service
 launchctl load ~/Library/LaunchAgents/com.parakeet.asr.plist
+
+# Check status
+launchctl list | grep parakeet
+
+# View logs
+tail -f /tmp/parakeet.log
 ```
 
 ### Linux (systemd)
@@ -460,11 +568,13 @@ Then:
 ```bash
 sudo systemctl enable parakeet-asr
 sudo systemctl start parakeet-asr
+sudo systemctl status parakeet-asr
 ```
 
 ## Making the Setup Persistent
 
 ### Option 1: Manual Start Script
+
 Create `~/start-parakeet.sh`:
 
 ```bash
@@ -484,8 +594,8 @@ else
     cd ~/parakeet-asr
     nohup python server.py > /tmp/parakeet.log 2>&1 &
     
-    # Wait for server to start
-    sleep 3
+    # Wait for server to start (model loading takes time)
+    sleep 5
     
     if pgrep -f "server.py" > /dev/null; then
         echo "✓ Parakeet server started successfully"
@@ -516,7 +626,7 @@ echo "Performance:"
 if command -v nvidia-smi &> /dev/null; then
     echo "  GPU detected: Up to 3386x real-time transcription"
 else
-    echo "  CPU mode: ~10x real-time transcription"
+    echo "  CPU mode: ~10-15x real-time transcription"
 fi
 echo ""
 echo "To use voice in Claude Code:"
@@ -524,17 +634,12 @@ echo "1. Start a new terminal"
 echo "2. Run: export VOICEMODE_STT_BASE_URL=\"http://127.0.0.1:2022/v1\""
 echo "3. Run: claude"
 echo "4. Say 'Let's have a voice conversation' to test"
-echo ""
-echo "To stop server: pkill -f server.py"
-echo "To view logs: tail -f /tmp/parakeet.log"
 ```
 
-Make it executable:
-```bash
-chmod +x ~/start-parakeet.sh
-```
+Make it executable: `chmod +x ~/start-parakeet.sh`
 
 ### Option 2: Add to Shell Profile
+
 Add to `~/.bashrc` or `~/.zshrc`:
 
 ```bash
@@ -578,6 +683,9 @@ kill -9 <PID>
 # Or try a different port
 # Edit server.py to use port 3022
 # Then update: export VOICEMODE_STT_BASE_URL="http://127.0.0.1:3022/v1"
+
+# Check Python version (must be 3.8-3.11)
+python --version
 ```
 
 ### CUDA/GPU Issues
@@ -588,6 +696,9 @@ python -c "import torch; print(torch.cuda.is_available())"
 # If False, install CUDA toolkit:
 # Ubuntu: sudo apt install nvidia-cuda-toolkit
 # Or use CPU-only (slower but works)
+
+# Check GPU memory
+nvidia-smi
 ```
 
 ### Model Loading Errors
@@ -597,8 +708,29 @@ cd ~/parakeet-asr/models
 rm parakeet-tdt-0.6b-v2.nemo
 wget https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/resolve/main/parakeet-tdt-0.6b-v2.nemo
 
-# Check model size (should be ~600MB)
+# Check model size (should be ~2.3GB)
 ls -lh parakeet-tdt-0.6b-v2.nemo
+
+# Check disk space
+df -h ~/parakeet-asr
+```
+
+### NeMo Installation Issues
+```bash
+# Common issues and fixes:
+
+# 1. Python version incompatibility
+# NeMo requires Python 3.8-3.11, not 3.12+
+
+# 2. Dependency conflicts
+pip install --upgrade pip
+pip install --upgrade setuptools wheel
+
+# 3. Missing system libraries (Linux)
+sudo apt-get install libsndfile1 sox libsox-dev
+
+# 4. Memory issues during installation
+pip install --no-cache-dir "nemo_toolkit[asr]"
 ```
 
 ### Microphone Not Working (macOS)
@@ -610,6 +742,9 @@ ls -lh parakeet-tdt-0.6b-v2.nemo
 # Test microphone
 rec -r 16000 -c 1 test.wav trim 0 3
 play test.wav
+
+# Check default input device
+system_profiler SPAudioDataType | grep "Default Input"
 ```
 
 ### Slow Transcription
@@ -620,18 +755,27 @@ python -c "import torch; print('GPU' if torch.cuda.is_available() else 'CPU')"
 # Monitor resource usage
 # GPU: nvidia-smi
 # CPU: top or htop
+
+# Reduce model precision for faster inference (advanced)
+# Edit server.py to use mixed precision
 ```
 
-## Performance Comparison
+### TTS Not Working
+```bash
+# Check if system TTS is available
+# macOS:
+which say
 
-| Model | Hardware | Speed | Accuracy | Power Usage |
-|-------|----------|-------|----------|-------------|
-| **Parakeet** | RTX 4090 | 3386x real-time | State-of-art | ~100W |
-| **Parakeet** | RTX 3060 | ~1000x real-time | State-of-art | ~60W |
-| **Parakeet** | M2 Mac (CPU) | ~15x real-time | State-of-art | ~20W |
-| **Parakeet** | Intel i7 (CPU) | ~10x real-time | State-of-art | ~45W |
-| Whisper base | M2 Mac | ~50x real-time | Good | ~20W |
-| Whisper base | Intel i7 | ~30x real-time | Good | ~45W |
+# Linux:
+which espeak || which festival
+
+# Test system TTS
+# macOS:
+say "Hello from system text to speech"
+
+# Linux:
+espeak "Hello from system text to speech"
+```
 
 ## Performance Optimization
 
@@ -646,6 +790,7 @@ batch_size = 8  # Adjust based on GPU memory
 ```python
 # Pre-load model on startup (already in script)
 # Keep model in GPU memory
+# Use smaller chunks for streaming
 ```
 
 ### For CPU Optimization
@@ -655,44 +800,83 @@ export OMP_NUM_THREADS=8  # Adjust to your CPU cores
 
 # Install MKL for Intel CPUs
 pip install intel-extension-for-pytorch
+
+# Use CPU-specific optimizations in NeMo
 ```
+
+### Memory Usage
+- Model loading: ~3GB RAM
+- Runtime with model: ~4-5GB RAM
+- GPU memory (if available): ~3GB VRAM
+
+## Performance Comparison
+
+### Parakeet vs Whisper
+
+| Model | Hardware | Speed | Accuracy | Power Usage |
+|-------|----------|-------|----------|-------------|
+| **Parakeet** | RTX 4090 | 3386x real-time | State-of-art | ~100W |
+| **Parakeet** | RTX 3060 | ~1000x real-time | State-of-art | ~60W |
+| **Parakeet** | M2 Mac (CPU) | ~15x real-time | State-of-art | ~20W |
+| **Parakeet** | Intel i7 (CPU) | ~10x real-time | State-of-art | ~45W |
+| Whisper base | M2 Mac | ~50x real-time | Good | ~20W |
+| Whisper base | Intel i7 | ~30x real-time | Good | ~45W |
 
 ## Uninstall
 
 ```bash
+# Remove Voice Mode from Claude Code
+claude mcp remove voice-mode
+
 # Stop background service (macOS)
 launchctl unload ~/Library/LaunchAgents/com.parakeet.asr.plist
+rm ~/Library/LaunchAgents/com.parakeet.asr.plist
 
 # Stop background service (Linux)
 sudo systemctl stop parakeet-asr
 sudo systemctl disable parakeet-asr
-
-# Remove Voice Mode from Claude Code
-claude mcp remove voice-mode
+sudo rm /etc/systemd/system/parakeet-asr.service
 
 # Stop server
 pkill -f server.py
 
-# Remove files (optional)
+# Remove virtual environment and models (optional)
 rm -rf ~/parakeet-asr
+
+# Remove environment variables
+# Edit ~/.bashrc or ~/.zshrc and remove the VOICEMODE_STT_BASE_URL line
 ```
 
 ## Next Steps
 
+### Add Local Text-to-Speech
+- **Piper**: Fast, lightweight, multilingual (`pip install piper-tts`)
+- **Coqui TTS**: High quality, voice cloning capable
+- **NVIDIA FastPitch + HiFiGAN**: Professional quality (see full NVIDIA setup)
+- **Kokoro**: Small, fast, good quality
+
+### Enhance Speech Recognition
 - **Custom Wake Words**: Integrate with tools like Porcupine for "Hey Claude"
-- **TTS Addition**: Add local TTS with Kokoro or Piper for responses
 - **Multi-language**: Parakeet supports multiple languages with different models
 - **Fine-tuning**: Customize Parakeet for domain-specific vocabulary
+- **Streaming**: Implement real-time streaming transcription
+
+### GPU Acceleration
+- **NVIDIA GPU**: Install CUDA for massive speedup
+- **Apple Silicon**: Investigate CoreML conversion
+- **AMD GPU**: Check ROCm compatibility
 
 ## Resources
 
 - [NVIDIA Parakeet on Hugging Face](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2)
 - [NVIDIA NeMo Documentation](https://docs.nvidia.com/deeplearning/nemo/user-guide/docs/en/stable/)
+- [Parakeet Technical Blog](https://developer.nvidia.com/blog/pushing-the-boundaries-of-speech-recognition-with-nemo-parakeet-asr-models/)
 - [Voice Mode Documentation](https://voice-mode.readthedocs.io)
 - [Claude Code Documentation](https://docs.anthropic.com/claude-code)
+- [MCP Protocol Spec](https://modelcontextprotocol.io)
 
 ---
 
-**Performance Note**: NVIDIA Parakeet provides the fastest available speech recognition, processing audio 3386x faster than real-time on modern GPUs. This means a 1-hour recording transcribes in just 1 second!
+**Performance Note**: NVIDIA Parakeet provides the fastest available speech recognition, processing audio 3386x faster than real-time on modern GPUs. Even on CPU, it achieves 10-15x real-time performance.
 
-**Privacy Note**: All audio processing happens locally on your machine. No audio data is sent to external servers. Your voice commands and code remain completely private.
+**Privacy Note**: All voice processing happens locally on your machine. Speech-to-text uses NVIDIA Parakeet and text-to-speech uses your system's built-in voice synthesis. No audio data or text is sent to external servers. Your voice commands and responses remain completely private.
