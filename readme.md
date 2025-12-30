@@ -1,5 +1,7 @@
 # Claudio - Voice-Controlled Claude Code Setup
 
+This is now a plugin in the [clapplications marketplace](https://github.com/johnhenry/clapplications).
+
 Comprehensive guides and scripts for setting up voice-controlled Claude Code with local speech recognition.
 
 ## Overview
