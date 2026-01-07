@@ -54,6 +54,9 @@ async def generate_speech(request: TTSRequest):
         wav = model.generate(request.input)
         
         # Convert to bytes
+        # Note: ChatterboxTurboTTS currently only supports WAV output.
+        # The response_format parameter is accepted for API compatibility
+        # but the actual format is always WAV regardless of the request.
         buffer = io.BytesIO()
         wav.export(buffer, format="wav")
         audio_bytes = buffer.getvalue()
