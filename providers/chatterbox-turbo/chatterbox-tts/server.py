@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""
+Chatterbox TTS Server - OpenAI-compatible TTS API
+Fixed to accept JSON body instead of query parameters
+"""
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
+from pydantic import BaseModel
+import uvicorn
+from chatterbox.tts_turbo import ChatterboxTurboTTS
+import io
+
+app = FastAPI(title="Chatterbox TTS Server")
+model = None
+
+class TTSRequest(BaseModel):
+    input: str
+    model: str = "tts-1"
+    voice: str = "default"
+    response_format: str = "mp3"
+
+@app.on_event("startup")
+async def load_model():
+    global model
+    model = ChatterboxTurboTTS()
+    return {"status": "ok", "model": "chatterbox-turbo"}
+
+@app.post("/v1/audio/speech")
+async def generate_speech(request: TTSRequest):
+    """OpenAI-compatible TTS endpoint"""
+    global model
+    
+    if not request.input:
+        raise HTTPException(status_code=400, detail="No input text provided")
+    
+    # Generate audio
+    wav = model.generate(request.input)
+    
+    # Convert to bytes
+    buffer = io.BytesIO()
+    wav.export(buffer, format="wav")
+    audio_bytes = buffer.getvalue()
+    
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={
+            "Content-Disposition": f'attachment; filename="speech.wav"'
+        }
+    )
+
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "model": "chatterbox-turbo"}
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8004)
