@@ -3,6 +3,7 @@
 Chatterbox TTS Server - OpenAI-compatible TTS API
 Fixed to accept JSON body instead of query parameters
 """
+from contextlib import asynccontextmanager
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
@@ -11,8 +12,6 @@ import uvicorn
 from chatterbox.tts_turbo import ChatterboxTurboTTS
 import io
 
-app = FastAPI(title="Chatterbox TTS Server")
-model = None
 
 class TTSRequest(BaseModel):
     input: str
@@ -20,16 +19,24 @@ class TTSRequest(BaseModel):
     voice: str = "default"
     response_format: str = "mp3"
 
-@app.on_event("startup")
-async def load_model():
-    global model
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Load the model
     model = ChatterboxTurboTTS()
-    return {"status": "ok", "model": "chatterbox-turbo"}
+    app.state.model = model
+    yield
+    # Shutdown: Clean up resources
+    app.state.model = None
+
+
+app = FastAPI(title="Chatterbox TTS Server", lifespan=lifespan)
+
 
 @app.post("/v1/audio/speech")
 async def generate_speech(request: TTSRequest):
     """OpenAI-compatible TTS endpoint"""
-    global model
+    model = app.state.model
     
     if not request.input:
         raise HTTPException(status_code=400, detail="No input text provided")
@@ -50,9 +57,11 @@ async def generate_speech(request: TTSRequest):
         }
     )
 
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "model": "chatterbox-turbo"}
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=8004)

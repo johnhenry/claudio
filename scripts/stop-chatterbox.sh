@@ -31,7 +31,8 @@ if lsof -i :8004 > /dev/null 2>&1; then
     echo "⚠ Port 8004 is still in use by:"
     lsof -i :8004
     echo "Attempting to free port..."
-    lsof -ti :8004 | xargs kill -9 2>/dev/null
+    # Use -r flag to handle empty input gracefully
+    lsof -ti :8004 | xargs -r kill -9 2>/dev/null
     sleep 1
     if ! lsof -i :8004 > /dev/null 2>&1; then
         echo "✓ Port 8004 freed"

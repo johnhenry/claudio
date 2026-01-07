@@ -13,8 +13,19 @@ else
     if [ ! -d ~/chatterbox-turbo ]; then
         echo "Setting up Chatterbox-turbo for the first time..."
         
+        # Check if python3 is available
+        if ! command -v python3 &> /dev/null; then
+            echo "✗ python3 not found. Please install Python 3.8 or higher."
+            exit 1
+        fi
+        
         # Create virtual environment
         python3 -m venv ~/chatterbox-turbo
+        if [ $? -ne 0 ]; then
+            echo "✗ Failed to create virtual environment"
+            exit 1
+        fi
+        
         source ~/chatterbox-turbo/bin/activate
         
         # Install dependencies
@@ -23,8 +34,24 @@ else
         
         # Copy server.py to the virtual environment
         mkdir -p ~/chatterbox-turbo/server
-        cp "$(dirname "$0")/../providers/chatterbox-turbo/chatterbox-tts/server.py" ~/chatterbox-turbo/server/
-        cp "$(dirname "$0")/../providers/chatterbox-turbo/requirements.txt" ~/chatterbox-turbo/
+        
+        # Check if source files exist
+        SCRIPT_DIR="$(dirname "$0")"
+        SERVER_FILE="$SCRIPT_DIR/../providers/chatterbox-turbo/chatterbox-tts/server.py"
+        REQ_FILE="$SCRIPT_DIR/../providers/chatterbox-turbo/requirements.txt"
+        
+        if [ ! -f "$SERVER_FILE" ]; then
+            echo "✗ server.py not found at $SERVER_FILE"
+            exit 1
+        fi
+        
+        if [ ! -f "$REQ_FILE" ]; then
+            echo "✗ requirements.txt not found at $REQ_FILE"
+            exit 1
+        fi
+        
+        cp "$SERVER_FILE" ~/chatterbox-turbo/server/
+        cp "$REQ_FILE" ~/chatterbox-turbo/
         
         # Install requirements
         cd ~/chatterbox-turbo
