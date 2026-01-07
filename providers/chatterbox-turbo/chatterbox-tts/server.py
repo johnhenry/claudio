@@ -23,11 +23,19 @@ class TTSRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: Load the model
-    model = ChatterboxTurboTTS()
-    app.state.model = model
+    try:
+        model = ChatterboxTurboTTS()
+        app.state.model = model
+        print("✓ Chatterbox-turbo model loaded successfully")
+    except Exception as e:
+        print(f"✗ Failed to load Chatterbox-turbo model: {e}")
+        raise RuntimeError(f"Failed to initialize TTS model: {e}")
+    
     yield
+    
     # Shutdown: Clean up resources
     app.state.model = None
+    print("✓ Chatterbox-turbo model unloaded")
 
 
 app = FastAPI(title="Chatterbox TTS Server", lifespan=lifespan)
@@ -41,21 +49,27 @@ async def generate_speech(request: TTSRequest):
     if not request.input:
         raise HTTPException(status_code=400, detail="No input text provided")
     
-    # Generate audio
-    wav = model.generate(request.input)
-    
-    # Convert to bytes
-    buffer = io.BytesIO()
-    wav.export(buffer, format="wav")
-    audio_bytes = buffer.getvalue()
-    
-    return Response(
-        content=audio_bytes,
-        media_type="audio/wav",
-        headers={
-            "Content-Disposition": f'attachment; filename="speech.wav"'
-        }
-    )
+    try:
+        # Generate audio
+        wav = model.generate(request.input)
+        
+        # Convert to bytes
+        buffer = io.BytesIO()
+        wav.export(buffer, format="wav")
+        audio_bytes = buffer.getvalue()
+        
+        return Response(
+            content=audio_bytes,
+            media_type="audio/wav",
+            headers={
+                "Content-Disposition": f'attachment; filename="speech.wav"'
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to generate speech: {str(e)}"
+        )
 
 
 @app.get("/health")
