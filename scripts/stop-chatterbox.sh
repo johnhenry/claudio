@@ -31,8 +31,11 @@ if lsof -i :8004 > /dev/null 2>&1; then
     echo "⚠ Port 8004 is still in use by:"
     lsof -i :8004
     echo "Attempting to free port..."
-    # Use -r flag to handle empty input gracefully
-    lsof -ti :8004 | xargs -r kill -9 2>/dev/null
+    # Cross-platform compatible: check if there are PIDs before piping to xargs
+    PIDS=$(lsof -ti :8004 2>/dev/null)
+    if [ -n "$PIDS" ]; then
+        echo "$PIDS" | xargs kill -9 2>/dev/null
+    fi
     sleep 1
     if ! lsof -i :8004 > /dev/null 2>&1; then
         echo "✓ Port 8004 freed"
