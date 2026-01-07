@@ -11,6 +11,7 @@ Choose your setup based on your priorities:
 | **[Quick Start](#quick-start-cloud-based)** | OpenAI Whisper API | OpenAI TTS API | Fastest setup, pay-per-use |
 | **[Whisper Local](#option-1-whisper-local-stt)** | whisper.cpp (local) | OpenAI TTS API | Privacy for input, easy setup |
 | **[Parakeet Pro](#option-2-nvidia-parakeet-stt)** | NVIDIA Parakeet (local) | OpenAI TTS API | Fastest STT, NVIDIA GPU users |
+| **[Chatterbox Easy](#chatterbox-turbo-tts-local)** | Whisper/Parakeet | Chatterbox-turbo | Easy local setup, good quality |
 | **[Full Local](#option-3-full-local-stack)** | Whisper/Parakeet | Kokoro/NeMo TTS | Complete privacy, no API costs |
 | **[Full NVIDIA](#option-4-full-nvidia-stack)** | Parakeet ASR | NeMo TTS | Professional grade, GPU optimized |
 
@@ -241,7 +242,61 @@ Default option, high quality, requires API key.
 export OPENAI_API_KEY="your-api-key-here"
 ```
 
-### Option 2: Kokoro TTS (Local)
+### Option 2: Chatterbox-turbo TTS (Local)
+
+**Recommended for most users**: Fast, lightweight local TTS with easy setup and good quality.
+
+<details>
+<summary><b>Click to expand Chatterbox-turbo setup instructions</b></summary>
+
+#### Quick Install
+
+```bash
+# Use the provided script (recommended)
+./scripts/start-chatterbox.sh
+```
+
+This will automatically:
+- Create a Python virtual environment
+- Install all dependencies
+- Start the TTS server on port 8004
+
+#### Manual Install
+
+```bash
+# Create virtual environment
+python3 -m venv ~/chatterbox-turbo
+source ~/chatterbox-turbo/bin/activate
+
+# Install dependencies
+pip install fastapi uvicorn[standard] pydantic chatterbox-tts
+
+# Copy server files from this repo
+mkdir -p ~/chatterbox-turbo/server
+cp providers/chatterbox-turbo/chatterbox-tts/server.py ~/chatterbox-turbo/server/
+
+# Start server
+cd ~/chatterbox-turbo/server
+python server.py
+```
+
+#### Configure Voice Mode
+
+```bash
+export VOICEMODE_TTS_BASE_URL="http://127.0.0.1:8004/v1"
+```
+
+**Why Chatterbox-turbo?**
+- ✅ Easiest local TTS setup
+- ✅ OpenAI-compatible API (works with Voice Mode)
+- ✅ No Docker required
+- ✅ Fixed version included (see [detailed docs](readme-chatterbox-turbo.md))
+
+**Stop Server**: `./scripts/stop-chatterbox.sh`
+
+</details>
+
+### Option 3: Kokoro TTS (Local)
 
 Fast, lightweight local TTS with multiple voices.
 
@@ -273,7 +328,7 @@ export VOICEMODE_TTS_BASE_URL="http://127.0.0.1:8880/v1"
 
 </details>
 
-### Option 3: NVIDIA NeMo TTS (Local)
+### Option 4: NVIDIA NeMo TTS (Local)
 
 Professional-grade TTS using FastPitch + HiFiGAN.
 
@@ -317,6 +372,37 @@ export VOICEMODE_TTS_BASE_URL="http://127.0.0.1:8880/v1"
 
 ## 🎭 Complete Setup Examples
 
+### Easy Local Setup: Whisper + Chatterbox-turbo (Recommended)
+
+The easiest fully local setup with good quality and privacy.
+
+```bash
+# 1. Start Whisper STT
+./scripts/start-whisper.sh
+
+# 2. Start Chatterbox-turbo TTS  
+./scripts/start-chatterbox.sh
+
+# 3. Configure Voice Mode (in a new terminal)
+export VOICEMODE_STT_BASE_URL="http://127.0.0.1:2022/v1"
+export VOICEMODE_TTS_BASE_URL="http://127.0.0.1:8004/v1"
+
+# 4. Install Voice Mode MCP (first time only)
+claude mcp add --scope user voice-mode uvx voice-mode
+
+# 5. Start Claude
+claude
+
+# 6. Say "Let's have a voice conversation"
+```
+
+**Why this setup?**
+- ✅ Fully local (complete privacy)
+- ✅ Easy setup (automated scripts)
+- ✅ Good quality for both STT and TTS
+- ✅ No Docker or GPU required
+- ✅ Works on Mac, Linux, and WSL2
+
 ### Option 3: Full Local Stack
 
 Complete privacy with Whisper + Kokoro.
@@ -326,7 +412,7 @@ Complete privacy with Whisper + Kokoro.
 cd ~/whisper.cpp
 ./build/bin/whisper-server -m models/ggml-base.en.bin --host 127.0.0.1 --port 2022 &
 
-# 2. Start Kokoro (follow Option 2 TTS above)
+# 2. Start Kokoro (follow Option 3 TTS above)
 cd ~/kokoro
 docker compose up -d
 
@@ -429,6 +515,7 @@ echo "Start Claude with: claude"
 | Model | Hardware | Speed | Quality | Voices |
 |-------|----------|-------|---------|--------|
 | **OpenAI API** | Cloud | N/A | Excellent | 6 |
+| **Chatterbox-turbo** | CPU | Fast | Good | Default |
 | **Kokoro** | CPU | 10x | Good | 20+ |
 | **Kokoro** | GPU | 50x | Good | 20+ |
 | **NeMo TTS** | CPU | 5x | Excellent | Customizable |
